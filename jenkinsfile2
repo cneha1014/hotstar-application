@@ -1,107 +1,97 @@
 pipeline {
     agent any
-
     tools {
         jdk 'jdk'
-        nodejs 'Node18'   // Updated NodeJS tool name (define it in Jenkins global tools)
+        nodejs 'node'
     }
-
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
     }
-
     stages {
-
-        stage('Clean Workspace') {
+        stage('clean workspace') {
             steps {
                 cleanWs()
             }
         }
-
         stage('Checkout from Git') {
             steps {
                 checkout scm
             }
         }
-
-        stage('SonarQube Analysis') {
+        stage("Sonarqube Analysis") {
             steps {
                 withSonarQubeEnv('SonarQube') {
-                    sh '''
-                        $SCANNER_HOME/bin/sonar-scanner \
-                        -Dsonar.projectName=Hotstar \
-                        -Dsonar.projectKey=Hotstar
-                    '''
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Hotstar \
+                    -Dsonar.projectKey=Hotstar '''
                 }
             }
         }
-
-        stage('Quality Gate') {
+        stage("quality gate") {
             steps {
                 script {
                     waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
                 }
             }
         }
-
         stage('Install Dependencies') {
             steps {
-                sh 'npm install'
+                sh "npm install"
             }
         }
 
-        stage('OWASP Dependency Check') {
+        stage('OWASP FS SCAN') {
             steps {
-                // Update NVD first to avoid "No documents exist" error
-                sh 'dependency-check.sh --updateOnly || true'
-                
-                dependencyCheck additionalArguments: '''--scan ./ \
-                    --disableYarnAudit \
-                    --disableNodeAudit \
-                    --nvdApiKey EF38C1AE-2CC0-F011-8364-0EBF96DE670D''',
-                    odcInstallation: 'DC'
+                script {
+                    echo "=== Updating OWASP Dependency-Check Database ==="
+                    // Update the NVD data to avoid "No documents exist" errors
+                    sh 'dependency-check.sh --updateOnly || true'
 
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                    echo "=== Running OWASP Dependency-Check Scan ==="
+                    // Run the actual scan and handle transient failures gracefully
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        dependencyCheck additionalArguments: '''
+                            --scan ./ \
+                            --disableYarnAudit \
+                            --disableNodeAudit \
+                            --format XML \
+                            --nvdApiKey EF38C1AE-2CC0-F011-8364-0EBF96DE670D
+                        ''', odcInstallation: 'DC', failBuildOnCVSS: 0
+
+                        dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+                    }
+
+                    echo "=== OWASP Dependency-Check Completed ==="
+                }
             }
         }
 
-        stage('Trivy File System Scan') {
+        stage('TRIVY FS SCAN') {
             steps {
-                sh 'trivy fs . > trivyfs.txt || true'
+                sh "trivy fs . > trivyfs.txt"
             }
         }
 
-        stage('Docker Build & Push') {
+        stage("Docker Build & Push") {
             steps {
                 script {
                     withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
-                        sh '''
-                            docker build -t hotstar .
-                            docker tag hotstar sarvjeet908/hotstar:latest
-                            docker push sarvjeet908/hotstar:latest
-                        '''
+                        sh "docker build -t hotstar ."
+                        sh "docker tag hotstar sarvjeet908/hotstar:2"
+                        sh "docker push sarvjeet908/hotstar:2"
                     }
                 }
             }
         }
 
-        stage('Trivy Image Scan') {
+        stage("TRIVY") {
             steps {
-                sh 'trivy image sarvjeet908/hotstar:latest > trivyimage.txt || true'
+                sh "trivy image sarvjeet908/hotstar:latest > trivyimage.txt"
             }
         }
 
-        stage('Deploy to Container') {
+        stage('Deploy to container') {
             steps {
-                script {
-                    // Stop & remove existing container if already running
-                    sh '''
-                        if [ "$(docker ps -aq -f name=hotstar)" ]; then
-                            docker rm -f hotstar || true
-                        fi
-                        docker run -d --name hotstar -p 3000:3000 sarvjeet908/hotstar:latest
-                    '''
-                }
+                sh 'docker run -d --name hotstar -p 3000:3000 sarvjeet908/hotstar:2'
             }
         }
     }
@@ -115,12 +105,12 @@ pipeline {
                 emailext(
                     subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
                     body: """
-                        <p>This is a Jenkins HOTSTAR CI/CD pipeline status.</p>
-                        <p><b>Project:</b> ${env.JOB_NAME}</p>
-                        <p><b>Build Number:</b> ${env.BUILD_NUMBER}</p>
-                        <p><b>Status:</b> ${buildStatus}</p>
-                        <p><b>Started by:</b> ${buildUser}</p>
-                        <p><b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                        <p>This is a Jenkins HOTSTAR CICD pipeline status.</p>
+                        <p>Project: ${env.JOB_NAME}</p>
+                        <p>Build Number: ${env.BUILD_NUMBER}</p>
+                        <p>Build Status: ${buildStatus}</p>
+                        <p>Started by: ${buildUser}</p>
+                        <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                     """,
                     to: 'sarvjeet908@gmail.com',
                     from: 'sarvjeet908@gmail.com',
