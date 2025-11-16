@@ -1,0 +1,146 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'jdk'
+        nodejs 'node'
+    }
+
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        CLUSTER_NAME = 'poc-eks-cluster-1'        // Replace with your actual EKS cluster name
+        DOCKER_IMAGE = 'sarvjeet908/hotstar:2'
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                    $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=Hotstar \
+                        -Dsonar.projectKey=Hotstar
+                    '''
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+
+// --- OWASP FS SCAN temporarily disabled ---
+// stage('OWASP FS SCAN') {
+//     steps {
+//         dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit --nvdApiKey D6CCE674-B4BF-F011-8364-0EBF96DE670D', odcInstallation: 'DC'
+//         dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+//     }
+// }
+
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh '''
+                        echo "Building and pushing Docker image..."
+                        docker build -t hotstar .
+                        docker tag hotstar $DOCKER_IMAGE
+                        docker push $DOCKER_IMAGE
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('TRIVY Image Scan') {
+            steps {
+                sh "trivy image $DOCKER_IMAGE > trivyimage.txt"
+            }
+        }
+
+        /* ===========================================
+           ✅ EKS DEPLOYMENT SECTION
+           =========================================== */
+
+        stage('Configure Kubeconfig for EKS') {
+            steps {
+                sh '''
+                echo "Configuring kubeconfig for EKS cluster..."
+                aws eks --region $AWS_DEFAULT_REGION update-kubeconfig --name $CLUSTER_NAME
+                kubectl get nodes
+                '''
+            }
+        }
+
+        stage('Deploy to EKS Cluster') {
+            steps {
+                sh '''
+                echo "Deploying Hotstar application to EKS..."
+                kubectl apply -f K8S/manifest.yml
+
+                echo "Verifying deployment rollout..."
+                kubectl rollout status deployment/hotstar-deployment
+
+                echo "Fetching service details..."
+                kubectl get svc hotstar-service -o wide
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            script {
+                def buildStatus = currentBuild.currentResult
+                def buildUser = currentBuild.getBuildCauses('hudson.model.Cause$UserIdCause')[0]?.userId ?: 'Github User'
+
+                emailext(
+                    subject: "Pipeline ${buildStatus}: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                    body: """
+                        <p>This is a Jenkins HOTSTAR CICD pipeline status.</p>
+                        <p>Project: ${env.JOB_NAME}</p>
+                        <p>Build Number: ${env.BUILD_NUMBER}</p>
+                        <p>Build Status: ${buildStatus}</p>
+                        <p>Started by: ${buildUser}</p>
+                        <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                    """,
+                    to: 'sarvjeet908@gmail.com',
+                    from: 'sarvjeet908@gmail.com',
+                    replyTo: 'sarvjeet908@gmail.com',
+                    mimeType: 'text/html',
+                    attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
+                )
+            }
+        }
+    }
+}
