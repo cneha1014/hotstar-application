@@ -56,8 +56,8 @@ pipeline{
                 script{
                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){   
                        sh "docker build -t hotstar ."
-                       sh "docker tag hotstar sarvjeet908/hotstar:2 "
-                       sh "docker push sarvjeet908/hotstar:2 "
+                       sh "docker tag hotstar nehacneh/hotstar:2 "
+                       sh "docker push nehacneh/hotstar:2 "
                     }
                 }
             }
@@ -69,7 +69,7 @@ pipeline{
         }
       /*  stage('Deploy to container'){
             steps{
-                sh 'docker run -d --name hotstar -p 80:80 sarvjeet908/hotstar:2'
+                sh 'docker run -d --name hotstar -p 80:80 nehacneh/hotstar:2'
             }
         }
      * /
@@ -111,9 +111,9 @@ pipeline{
                     <p>Started by: ${buildUser}</p>
                     <p>Build URL: <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                 """,
-                to: 'sarvjeet908@gmail.com',
-                from: 'sarvjeet908@gmail.com',
-                replyTo: 'sarvjeet908@gmail.com',
+                to: 'nehacneh1410@gmail.com',
+                from: 'nehacneh1410@gmail.com',
+                replyTo: 'nehacneh1410@gmail.com',
                 mimeType: 'text/html',
                 attachmentsPattern: 'trivyfs.txt,trivyimage.txt'
             )
