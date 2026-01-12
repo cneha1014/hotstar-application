@@ -54,7 +54,7 @@ pipeline{
         stage("Docker Build & Push"){
             steps{
                 script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){   
+                   withDockerRegistry(credentialsId: 'dockerhub-creds', toolName: 'docker'){   
                        sh "docker build -t hotstar ."
                        sh "docker tag hotstar nehacneh/hotstar:2 "
                        sh "docker push nehacneh/hotstar:2 "
@@ -64,7 +64,7 @@ pipeline{
         }
         stage("TRIVY"){
             steps{
-                sh "trivy image sarvjeet908/hotstar:2 > trivyimage.txt" 
+                sh "trivy image hotstar nehacneh/hotstar:2 > trivyimage.txt" 
             }
         }
       /*  stage('Deploy to container'){
