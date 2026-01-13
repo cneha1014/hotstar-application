@@ -62,9 +62,9 @@ pipeline{
                 }
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image hotstar nehacneh/hotstar:2 > trivyimage.txt" 
+        stage("TRIVY IMAGE SCAN") {
+            steps {
+                sh "trivy image nehacneh/hotstar:2 > trivyimage.txt"
             }
         }
       /*  stage('Deploy to container'){
